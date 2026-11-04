@@ -22,7 +22,8 @@ from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from pydantic_ai import Agent
+from pydantic_ai import Agent, DeferredToolRequests, DeferredToolResults, ToolApproved, ToolDenied
+from pydantic_ai.capabilities import HandleDeferredToolCalls
 from pydantic_ai.exceptions import ModelHTTPError
 from fastmcp import Client
 from pydantic_ai.mcp import MCPToolset, StdioTransport
@@ -39,17 +40,43 @@ INSTRUCTIONS = """\
 あなたはAIエンジニアリング講座（AIE2026）の学習支援エージェントです。
 - 用語や講座に固有のことを答える前に、必ず search_glossary で用語集を確認する。
 - 回の内容を聞かれたら get_lecture_summary を使う。
+- 確認問題や復習を求められたら make_quiz を使う。
+- 学習の記録を残す必要があるときは save_learning_log を使う。
 - 用語集に見つからないことは、推測で断定せず「用語集にはない」と伝える。
 - 回答の最後に、関係する回（第N回）を示す。
 - 宿題の答えそのものは書かず、考え方のヒントで導く。
 """
 
+def handle_deferred_tool_requests(
+    ctx,
+    requests: DeferredToolRequests,
+) -> DeferredToolResults:
+    """保存系ツールが呼ばれる前に、人手による承認を確認してから実行する。"""
+    approvals: dict[str, bool | ToolApproved | ToolDenied] = {}
+    for call in requests.approvals:
+        print(f"\n[承認待ち] tool={call.tool_name} args={call.args}")
+        while True:
+            answer = input("このツールを実行してよいですか？ [y/N]: ").strip().lower()
+            if answer in {"y", "yes"}:
+                approvals[call.tool_call_id] = ToolApproved()
+                break
+            if answer in {"n", "no", ""}:
+                approvals[call.tool_call_id] = ToolDenied("利用者が保存を拒否しました。")
+                break
+            print("y / n を入力してください。")
+    return requests.build_results(approvals=approvals)
+
+
 # モデルは実行時に渡す（テストではAPIを呼ばない TestModel に差し替えるため）
-agent = Agent(instructions=INSTRUCTIONS)
+agent = Agent(
+    instructions=INSTRUCTIONS,
+    output_type=[str, DeferredToolRequests],
+    capabilities=[HandleDeferredToolCalls(handler=handle_deferred_tool_requests)],
+)
 agent.tool_plain(tools.search_glossary)
 agent.tool_plain(tools.get_lecture_summary)
-
-# TODO(第3回 演習): tools.py に make_quiz を作り、ここで登録しよう
+agent.tool_plain(tools.make_quiz)
+agent.tool_plain(tools.save_learning_log, requires_approval=True)
 
 # 第5回: 使う MCP サーバーの設定ファイル。Claude Desktop や Cursor と同じ "mcpServers" 形式
 MCP_CONFIG = Path(__file__).resolve().parent / "mcp_servers.json"
@@ -179,7 +206,12 @@ def load_mcp_servers(config_path: Path = MCP_CONFIG) -> list[MCPToolset]:
 
 def build_mcp_agent(config_path: Path = MCP_CONFIG) -> Agent:
     """第5回: 関数を直接登録する代わりに、MCP サーバーが公開するツールを使うエージェント。INSTRUCTIONS は同じ。"""
-    return Agent(instructions=INSTRUCTIONS, toolsets=load_mcp_servers(config_path))
+    return Agent(
+        instructions=INSTRUCTIONS,
+        toolsets=load_mcp_servers(config_path),
+        output_type=[str, DeferredToolRequests],
+        capabilities=[HandleDeferredToolCalls(handler=handle_deferred_tool_requests)],
+    )
 
 
 def build_model() -> GoogleModel:

@@ -5,6 +5,9 @@
 """
 
 import json
+import random
+import re
+from datetime import datetime
 from functools import cache
 from pathlib import Path
 
@@ -77,3 +80,67 @@ def get_lecture_summary(lecture: int) -> str:
         available = sorted(p.stem for p in (DATA_DIR / "lectures").glob("*.md"))
         return f"第{lecture}回の要点はまだありません。用意されている回: {', '.join(available)}"
     return path.read_text(encoding="utf-8")
+
+def make_quiz(lecture: int) -> str:
+    """指定した回の用語から1問を選んで、復習用の確認問題を作る。
+
+    「第2回の確認問題を出して」「この回の問題を作って」のように、
+    学習内容の振り返りや復習を求められたときに使うツール。
+    その回で扱う用語が見つからない場合は、利用可能な回やエラー内容を返す。
+    """
+    glossary = load_glossary()
+    terms = [entry for entry in glossary if entry.get("lecture") == lecture]
+
+    if not terms:
+        available = sorted({entry["lecture"] for entry in glossary})
+        return json.dumps(
+            {
+                "question": f"第{lecture}回の用語はまだ登録されていません。利用可能な回: {available}",
+                "answer": None,
+            },
+            ensure_ascii=False,
+        )
+
+    term = random.choice(terms)
+    return json.dumps(
+        {
+            "question": f"「{term['term']}」の意味は？",
+            "answer": term["definition"],
+        },
+        ensure_ascii=False,
+    )
+
+
+def save_learning_log(topic: str, note: str) -> str:
+    """学習した内容を learning_log/ に保存して、後で振り返れるようにする。
+
+    これは「学習メモを残す」ためのツールで、保存は取り消しにくいため、
+    実行前に利用者の明示的な確認を挟む。学習の振り返り・まとめ・気づきの記録に使う。
+    """
+    topic = topic.strip()
+    note = note.strip()
+    if not topic:
+        return json.dumps({"status": "error", "message": "topic が空です。"}, ensure_ascii=False)
+    if not note:
+        return json.dumps({"status": "error", "message": "note が空です。"}, ensure_ascii=False)
+
+    log_dir = Path(__file__).resolve().parent.parent / "learning_log"
+    log_dir.mkdir(exist_ok=True)
+
+    safe_topic = re.sub(r"[^0-9A-Za-zぁ-んァ-ン一-龥ー_\- ]+", "", topic)
+    safe_topic = safe_topic.strip() or "learning"
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    filename = f"{timestamp}_{safe_topic[:40]}.md"
+    path = log_dir / filename
+
+    content = (
+        f"# {topic}\n\n"
+        f"- 保存日時: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+        f"{note}\n"
+    )
+    path.write_text(content, encoding="utf-8")
+
+    return json.dumps(
+        {"status": "saved", "path": str(path), "filename": filename},
+        ensure_ascii=False,
+    )

@@ -39,6 +39,22 @@ def test_lecture_summary():
     assert "まだありません" in tools.get_lecture_summary(99)
 
 
+def test_make_quiz_returns_question_and_answer_for_a_lecture():
+    quiz = json.loads(tools.make_quiz(2))
+    assert "question" in quiz
+    assert "answer" in quiz
+    assert "意味は？" in quiz["question"]
+    assert quiz["answer"]
+
+
+def test_save_learning_log_creates_a_file_in_learning_log_directory():
+    saved = json.loads(tools.save_learning_log("pytest確認", "メモの保存テストです。"))
+    assert saved["status"] == "saved"
+    assert saved["path"].endswith(".md")
+    assert "/learning_log/" in saved["path"]
+    assert __import__("pathlib").Path(saved["path"]).exists()
+
+
 def test_default_question_of_lecture1_is_answerable_from_glossary():
     """第1回の既定の質問（app.ask）は、第3回のエージェントが用語集で正しく答えられること。"""
     from app.ask import DEFAULT_QUESTION
