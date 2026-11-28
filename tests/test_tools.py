@@ -55,7 +55,10 @@ def test_make_quiz_selects_a_term_from_the_requested_lecture(monkeypatch):
 
 def test_make_quiz_reports_when_lecture_has_no_terms():
     result = json.loads(tools.make_quiz(99))
-    assert "error" in result
+    assert result["error"] == (
+        "その回の用語は用意されていません。利用できる回: "
+        "第1回、第2回、第3回、第4回、第6回。"
+    )
 
 
 def test_lecture_summary():

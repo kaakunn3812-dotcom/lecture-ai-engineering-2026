@@ -77,8 +77,10 @@ def make_quiz(lecture: int) -> str:
     """
     terms = [entry for entry in load_glossary() if entry["lecture"] == lecture]
     if not terms:
+        available = sorted({entry["lecture"] for entry in load_glossary()})
+        available_text = "、".join(f"第{number}回" for number in available)
         return json.dumps(
-            {"error": f"第{lecture}回の用語が用語集にありません。"},
+            {"error": f"第{lecture}回の用語は用意されていません。利用できる回: {available_text}。"},
             ensure_ascii=False,
         )
 
